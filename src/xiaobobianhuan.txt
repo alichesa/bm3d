@@ -1,0 +1,247 @@
+#include <iostream>
+#include <string>
+#include "bm3d.hpp"
+#define cimg_display 0
+#include "CImg.h"
+
+using namespace cimg_library;
+
+// Haar小波1D变换
+void haarTransform1D(std::vector<double>& data) {
+    size_t N = data.size();
+    std::vector<double> result(N);
+
+    for (size_t step = 1; step < N; step *= 2) {
+        // 临时数组来存储中间结果
+        std::vector<double> temp(N);
+        for (size_t i = 0; i < N / 2; ++i) {
+            size_t j = 2 * i;
+            size_t k = j + 1;
+            temp[i] = (data[j] + data[k]) / std::sqrt(2);
+            temp[i + N / 2] = (data[j] - data[k]) / std::sqrt(2);
+        }
+        data = temp; // 用temp替换原始data
+    }
+}
+
+void haarTransform2D(CImg<double>& img) {
+    int rows = img.height();
+    int cols = img.width();
+
+    std::cout << "Starting Haar Transform 2D with dimensions: " << rows << " x " << cols << std::endl;
+
+    // 逐行进行Haar小波变换
+    for (int i = 0; i < rows; ++i) {
+        std::vector<double> row(cols);
+        for (int j = 0; j < cols; ++j) {
+            row[j] = img(i, j);
+        }
+        haarTransform1D(row);
+        for (int j = 0; j < cols; ++j) {
+            img(i, j) = row[j];
+        }
+    }
+
+    // 逐列进行Haar小波变换
+    for (int j = 0; j < cols; ++j) {
+        std::vector<double> col(rows);
+        for (int i = 0; i < rows; ++i) {
+            col[i] = img(i, j);
+        }
+        haarTransform1D(col);
+        for (int i = 0; i < rows; ++i) {
+            img(i, j) = col[i];
+        }
+    }
+
+    std::cout << "Finished Haar Transform 2D." << std::endl;
+}
+
+
+
+// 估计噪声标准差
+double estimateNoiseStd(CImg<double>& img) {
+    int rows = img.height();
+    int cols = img.width();
+
+    // 提取高频分量（这里只取最细小波系数的中位数作为噪声估计）
+    std::vector<double> highFreqCoeff;
+
+    for (int i = rows / 2; i < rows; ++i) {
+        for (int j = cols / 2; j < cols; ++j) {
+            highFreqCoeff.push_back(img(i, j));
+        }
+    }
+
+    // 计算中位数
+    std::sort(highFreqCoeff.begin(), highFreqCoeff.end());
+    size_t size = highFreqCoeff.size();
+    double median = size % 2 == 0 ? (highFreqCoeff[size / 2 - 1] + highFreqCoeff[size / 2]) / 2.0 : highFreqCoeff[size / 2];
+
+    // 使用中位数估计噪声标准差
+    return median / 0.6745;
+}
+
+int main(int argc, char** argv)  //argc是传入个数，argv是字符串数组
+{
+	// 初始格式应该是 {噪声图像，去噪图像，标准差，图像类型，，，}
+
+	float sigma = strtof(argv[3],NULL);  //设置为浮点类型
+
+	// 错误检查
+	if( argc < 4 )
+	{
+		std::cerr << "Usage: " << argv[0] << " NosiyImage DenoisedImage sigma [color [twostep [quiet [ReferenceImage]]]]" << std::endl;
+		return 1;
+	}
+
+	unsigned int channels = 1;  // 默认通道是1
+	bool twostep = false; // 默认是一步
+	bool verbose = true; // 默认开启调试信息
+
+	// 根据命令行确定是否进行修改
+	if (argc >= 5 && strcmp(argv[4],"color") == 0)
+	{
+		channels = 3;
+	}
+	
+	if (argc >= 6 && strcmp(argv[5],"twostep") == 0)
+	{
+		twostep = true;
+	}
+	
+	if (argc >= 7 && strcmp(argv[6],"quiet") == 0)
+	{
+		verbose = false;
+	}
+
+	if (verbose)
+	{
+		std::cout << "Sigma = " << sigma << std::endl;
+		if (twostep)
+			std::cout << "Number of Steps: 2" << std::endl;
+		else
+			std::cout << "Number of Steps: 1" << std::endl;
+
+		if (channels > 1)
+			std::cout << "Color denoising: yes" << std::endl;
+		else
+			std::cout << "Color denoising: no" << std::endl;
+	}
+	
+	// 图片定义
+	CImg<unsigned char> image(argv[1]);
+	CImg<unsigned char> image2(image.width(), image.height(), 1, channels, 0);
+
+
+	// 创建图像的副本
+	CImg<unsigned char> noisyImg(image);
+
+	// 将 noisyImg 转换为 double 类型
+	CImg<double> noisyImgDouble(image.width(), image.height(), 1, channels, 0);
+	for (int i = 0; i < image.width(); ++i) {
+    	for (int j = 0; j < image.height(); ++j) {
+        	noisyImgDouble(i, j) = static_cast<double>(noisyImg(i, j));
+    	}
+	}
+
+	// 填充图像到 2 的幂次方大小
+	int new_width = 1;
+	int new_height = 1;
+	while (new_width < noisyImgDouble.width()) new_width *= 2;
+	while (new_height < noisyImgDouble.height()) new_height *= 2;
+
+	// 如果图像的宽度或高度不是2的幂次方，进行填充
+	if (new_width != noisyImgDouble.width() || new_height != noisyImgDouble.height()) {
+    	// 创建一个新的 CImg 对象，大小是 2 的幂次方
+    	CImg<double> padded_img(new_width, new_height);
+    	padded_img.fill(0);  // 用 0 填充新图像
+
+    	// 将原始图像复制到新图像的左上角
+    	padded_img.draw_image(0, 0, noisyImgDouble);
+
+    	// 更新 noisyImgDouble 为填充后的图像
+    	noisyImgDouble = padded_img;
+	}
+
+	std::cout << "Image dimensions after padding: " << noisyImgDouble.width() << " x " << noisyImgDouble.height() << std::endl;
+
+	// 对图像进行小波变换
+	haarTransform2D(noisyImgDouble);
+
+	// 估计噪声标准差
+	double estimatedNoiseStd = estimateNoiseStd(noisyImgDouble);
+
+	// 使用已声明的 sigma 变量
+	sigma = static_cast<float>(estimatedNoiseStd);
+
+
+	// 转换到YCbcr空间后只是第一维度需要方差，其余都是标准差
+	std::vector<unsigned int> sigma2(channels);
+	sigma2[0] = (unsigned int)(sigma * sigma);
+	
+	//Convert color image to YCbCr color space
+	if (channels == 3)
+	{
+		image = image.get_channels(0, 2).RGBtoYCbCr();
+		//Convert the sigma^2 variance to the YCbCr color space
+		long s = sigma * sigma;
+		sigma2[0] = ((66l*66l*s + 129l*129l*s + 25l*25l*s) / (256l*256l));
+		sigma2[1] = ((38l*38l*s + 74l*74l*s + 112l*112l*s) / (256l*256l)),
+		sigma2[2] = ((112l*112l*s + 94l*94l*s + 18l*18l*s) / (256l*256l));
+	}
+
+	// 输出实际方差
+	std::cout << "Noise variance for individual channels (YCrCb if color): ";
+	for (unsigned int k = 0; k < sigma2.size(); k++)
+		std::cout << sigma2[k] << " ";
+	std::cout << std::endl;
+
+	// Check for invalid input
+	if(! image.data() )							
+	{
+		std::cerr << "Could not open or find the image" << std::endl;
+		return 1;
+	}
+
+	if(verbose)
+		std::cout << "width: " << image.width() << " height: " << image.height() << std::endl;
+
+	//Launch BM3D
+	try {
+		BM3D bm3d;
+		//		    (n, k,N, T,   p,sigma, L3D)
+		bm3d.set_hard_params(19,8,16,2500,3, 2.7f);
+		bm3d.set_wien_params(19,8,32,400, 3);
+		bm3d.set_verbose(verbose);
+		bm3d.denoise_host_image(
+				image.data(),
+				image2.data(),
+				image.width(),
+				image.height(),
+				channels,
+				sigma2.data(),
+				twostep);
+	}
+
+	catch(std::exception & e)  {
+		std::cerr << "There was an error while processing image: " << std::endl << e.what() << std::endl;
+		return 1;
+	}
+	
+	if (channels == 3) //color
+		//Convert back to RGB color space
+		image2 = image2.get_channels(0,2).YCbCrtoRGB();
+	else
+		image2 = image2.get_channel(0);
+	//Save denoised image
+	image2.save( argv[2] );
+
+	if (argc >= 8)
+	{
+		CImg<unsigned char> reference_image(argv[7]);
+		std::cout << "PSNR:" << reference_image.PSNR(image2) << std::endl;
+	}
+
+    return 0;
+}

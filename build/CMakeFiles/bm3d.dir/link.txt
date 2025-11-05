@@ -1,0 +1,1 @@
+/usr/bin/c++     CMakeFiles/bm3d.dir/src/filtering.cu.o CMakeFiles/bm3d.dir/src/blockmatching.cu.o CMakeFiles/bm3d.dir/src/dct8x8.cu.o CMakeFiles/bm3d.dir/src/main_nodisplay.cpp.o  -o bm3d   -L/usr/local/cuda-11.8/targets/x86_64-linux/lib/stubs  -L/usr/local/cuda-11.8/targets/x86_64-linux/lib  -lcufft -lcudart -lpng -lcudadevrt -lcudart_static -lrt -lpthread -ldl 
